@@ -1,85 +1,196 @@
-# Agent External Memory Skill
+---
+name: agent-external-memory
+version: 2.0.0
+description: >
+  Local-first structured memory for AI agents. Survives session boundaries.
+  Local = instinct (fast, always available). Server = backup/sharing (when needed).
+  Use when: agent needs cross-session knowledge retention, structured lessons/decisions,
+  or multi-agent shared state.
+  NOT for: in-session notes (use memory/ files), ephemeral reminders (use cron),
+  or anything requiring real-time queries (use a database).
+---
 
-跨 Agent 共享记忆系统。所有 AI 成员通过这个系统读写共享知识。
+# Agent External Memory v2
 
-## 安装
+**Two layers. No more.**
+
+| Layer | Role | Speed | Dependency |
+|-------|------|-------|------------|
+| Local (`spark-memory/`) | Instinct | ~5ms | None |
+| Server (`skycetus.cn/memory/`) | Backup + sharing | ~2s | Network + SSH |
+
+## Script Location
+
+```
+{skill_dir}/scripts/sync_memory.py
+```
+
+Python: `C:\Program Files\Python312\python.exe`
+
+## Commands
+
+### learn — Write a memory (the only write command you need)
 
 ```bash
-# 通过 SkillHub 安装
-skillhub install agent-external-memory
-
-# 或手动安装
-git clone https://github.com/binbinyu99-crypto/agent-external-memory.git
+python sync_memory.py learn --topic <topic> --content "<what you learned>" [--importance 0.8] [--type lesson|decision|fact|reflection] [--sensitivity private]
 ```
 
-## 记忆系统架构
+- Default importance: 0.7
+- Default type: fact
+- Default sensitivity: internal (safe to push)
+- `--sensitivity private` → NEVER pushed to server
 
-### V2 新增功能（2026-05-01）
-- **语义搜索**：基于 embedding 的语义相似度搜索（替代关键词匹配）
-- **写入 API**：Agent 可直接写入记忆，无需 SSH 部署
-- **自动蒸馏**：高质量分析自动提取并沉淀到共享记忆
+### recall — Read memories (reinforces accessed entries)
 
-### 记忆文件结构
-```
-https://skycetus.cn/memory/
-├── shared/
-│   ├── decisions.json    # 决策记录
-│   ├── infrastructure.json  # 基础设施知识
-│   ├── projects.json     # 项目知识
-│   ├── protocols.json    # 协议/规范
-│   └── analyses.json     # 分析结果（新增）
-├── etern/                # Etern 私有记忆
-│   ├── index.json
-│   └── getting-started.json
-├── spark/                # Spark 私有记忆
-├── lucas/                # Lucas 私有记忆
-└── xiaoyuan/             # 小元私有记忆
+```bash
+python sync_memory.py recall                    # Show all topics overview
+python sync_memory.py recall --topic <topic>    # Show entries, boost access_count
+python sync_memory.py recall --query "keyword"  # Search across all topics
 ```
 
-### 写入 API
+Every `recall --topic` call increments `access_count` on matched entries. Frequently recalled memories naturally rise in effective importance.
+
+### push — Backup to server (private entries auto-filtered)
+
+```bash
+python sync_memory.py push
 ```
-POST http://127.0.0.1:8001/api/v1/memory/
+
+### pull — Restore from server
+
+```bash
+python sync_memory.py pull
+```
+
+### digest — Smart compaction (not dumb truncation)
+
+```bash
+python sync_memory.py digest --topic <topic> [--max 20]
+```
+
+Unlike v1 compact (which just deleted low-importance entries), digest:
+1. Groups entries by similarity (simple keyword overlap)
+2. Merges related entries into consolidated ones
+3. Decays entries that haven't been accessed in 30+ days
+4. Preserves all decision/lesson types regardless of age
+
+### status — Quick health check
+
+```bash
+python sync_memory.py status
+```
+
+Shows: total entries, topics, staleness, last push time, entries needing decay.
+
+## Mandatory Integration Points
+
+### 1. Session Start (Boot Sequence)
+
+Already in AGENTS.md step 5. On every session start:
+
+```
+python sync_memory.py status
+```
+
+If stale (>24h since last sync and server is reachable):
+
+```
+python sync_memory.py pull
+```
+
+### 2. Post-Work Writeback (MANDATORY REFLEX)
+
+**After ANY of these events, you MUST call `learn`:**
+
+- Flywheel analysis completed → `learn --topic flywheel-runs`
+- Infrastructure fixed/deployed → `learn --topic infrastructure`
+- Bug found and fixed → `learn --topic lessons`
+- Robin makes a key decision → `learn --topic robin-decisions`
+- Architecture/design change → `learn --topic architecture`
+- API/tool quirk discovered → `learn --topic tool-quirks`
+
+**This is not optional. This is the Water→Wood cycle. Without writeback, every session starts from zero.**
+
+### 3. Before Flywheel Analysis
+
+Before running 五行飞轮 on any topic:
+
+```
+python sync_memory.py recall --query "<topic keywords>"
+```
+
+Feed relevant memories into the analysis as prior knowledge. This is the Wood phase's seed enrichment.
+
+## Memory Entry Schema (v2)
+
+```json
 {
-    "action": "append",
-    "file_type": "analyses",
-    "entry": {
-        "id": "unique_id",
-        "type": "analysis",
-        "content": "记忆内容",
-        "agent": "etern",
-        "tags": ["tag1", "tag2"]
-    }
+  "id": "mem_spark_topic_001",
+  "agent": "spark",
+  "type": "fact|lesson|decision|reflection",
+  "content": "Concise statement",
+  "importance": 0.85,
+  "confidence": 0.8,
+  "sensitivity": "internal|private",
+  "tags": ["tag1", "tag2"],
+  "source": "session|flywheel|robin|heartbeat",
+  "access_count": 0,
+  "last_accessed": null,
+  "created_at": "2026-05-01T23:00:00+08:00",
+  "updated_at": "2026-05-01T23:00:00+08:00"
 }
 ```
 
-### 语义搜索
-```python
-from memory_api_v2 import SemanticSearch
+### Effective Importance (computed, not stored)
 
-ss = SemanticSearch()
-ss.build_index_from_web()
-results = ss.search("如何提高系统性能", top_k=5)
+```
+effective_importance = importance + (access_count * 0.02) - decay_penalty
 ```
 
-### 自动蒸馏
-```python
-from memory_api_v2 import AutoDistiller
+- `access_count * 0.02`: frequently recalled = more important (reinforcement)
+- `decay_penalty`: 0.01 per 7 days since last access, for non-decision/non-lesson types
+- Decisions and lessons never decay
 
-distiller = AutoDistiller()
-entry = distiller.distill(run_id, seed, quality_report)
-if entry:
-    distiller.writer.write(entry)
-```
+### Sensitivity Rules
 
-## 本地记忆 vs 共享记忆
+| Level | Local | Server | Description |
+|-------|-------|--------|-------------|
+| internal | ✅ | ✅ | Safe for server. Tech decisions, frameworks, analysis. |
+| private | ✅ | ❌ | API keys, passwords, personal info. NEVER leaves local. |
 
-| 类型 | 位置 | 可见性 | 用途 |
-|------|------|--------|------|
-| 本地记忆 | memory/*.md | 仅自己 | 个人经验、偏好 |
-| 共享记忆 | skycetus.cn/memory/shared/ | 所有 Agent | 团队知识、决策、协议 |
-| 私有记忆 | skycetus.cn/memory/{agent}/ | 所有 Agent | Agent 个人档案 |
+No "public" level. If it's on the server, it's readable by anyone with the URL.
 
-## GitHub
+## Relationship with LCM
 
-- 仓库: https://github.com/binbinyu99-crypto/agent-external-memory
-- License: MIT
+| Dimension | LCM | External Memory |
+|-----------|-----|-----------------|
+| What | Event memory (conversations) | Knowledge memory (distilled lessons) |
+| How | Automatic, passive | Active, agent-controlled |
+| Format | Text summaries (DAG) | Structured JSON |
+| Search | lcm_grep (semantic) | recall --query (keyword) |
+| Sharing | Single session | Multi-agent capable |
+| Decay | Automatic compaction | Access-based reinforcement |
+
+**Rule: Don't duplicate LCM.** External memory stores what LCM can't:
+- Structured decisions with metadata
+- Cross-session lessons (LCM compacts away details)
+- Multi-agent shared state
+- Importance-ranked knowledge
+
+## What Was Cut from v1
+
+| Feature | Why cut |
+|---------|---------|
+| Conflict protocol | Never used. Add back when 2+ agents actually write simultaneously. |
+| Psyche mapping | Branding, not function. |
+| Constitutional governance | Over-engineered for current scale. |
+| Importance decay table | Replaced by access-based reinforcement (simpler, data-driven). |
+| Multiple sensitivity levels | Reduced to 2 (internal/private). Binary is enforceable. |
+
+## Upgrade Path
+
+When this outgrows JSON files:
+1. Add SQLite with FTS5 for full-text search
+2. Add embedding vectors for semantic recall
+3. Add WebSocket for real-time cross-agent sync
+4. Platform-level hooks for true auto-read/write (requires OpenClaw support)
