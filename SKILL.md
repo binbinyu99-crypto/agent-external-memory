@@ -98,7 +98,18 @@ If stale (>24h since last sync and server is reachable):
 python sync_memory.py pull
 ```
 
-### 2. Post-Work Writeback (MANDATORY REFLEX)
+### 2. Atomic Decomposition (MANDATORY PRE-EXECUTION)
+
+**Before executing ANY task, decompose into Minimal Executable Units (MEUs):**
+
+- Each MEU = one verifiable output, <60s compute, independently retryable
+- Sequence by dependency, parallelize where possible
+- Execute one MEU → verify → next
+- Failed MEU = retry that MEU only, not the whole chain
+
+This applies to flywheel analyses too: each element (木/火/金/水/土) is an MEU. Don't generate all five in one monolithic call.
+
+### 3. Post-Work Writeback (MANDATORY REFLEX)
 
 **After ANY of these events, you MUST call `learn`:**
 
@@ -111,7 +122,7 @@ python sync_memory.py pull
 
 **This is not optional. This is the Water→Wood cycle. Without writeback, every session starts from zero.**
 
-### 3. Before Flywheel Analysis
+### 4. Before Flywheel Analysis
 
 Before running 五行飞轮 on any topic:
 
