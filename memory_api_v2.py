@@ -29,7 +29,7 @@ from dataclasses import dataclass, field
 MEMORY_CONFIG = {
     "base_url": "https://skycetus.cn/memory",
     "write_api_url": "http://127.0.0.1:8001/api/v1/memory",  # 本地写入 API
-    "embedding_api_key": "REDACTED_DASHSCOPE_KEY",
+    "embedding_api_key": os.environ.get("DASHSCOPE_API_KEY", ""),
     "embedding_base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
     "embedding_model": "text-embedding-v3",
     "db_path": None,  # 运行时设置
